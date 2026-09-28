@@ -1,0 +1,291 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-sans);  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-hover: var(--sidebar-hover);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted-soft: var(--muted-soft);
+  --color-soft-green: var(--soft-green);
+  --color-soft-green-foreground: var(--soft-green-foreground);
+  --color-very-soft-green: var(--very-soft-green);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-danger-soft: var(--danger-soft);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-soft: var(--warning-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  /* Panels & cards: one radius (18px). Controls: --radius (12px). */
+  --radius-sm: calc(var(--radius) * 0.5);
+  --radius-md: calc(var(--radius) * 0.75);
+  --radius-lg: var(--radius);
+  --radius-xl: 16px;
+  --radius-2xl: 18px;
+  --radius-3xl: 24px;
+  --radius-4xl: 28px;
+  --control-h: 2.5rem;
+  --control-h-sm: 2.25rem;
+  --control-h-xs: 2rem;
+  --control-h-lg: 2.75rem;
+}
+
+:root {
+  /* Xcel palette — cool slate surfaces, deep emerald accent */
+  --primary: #10B981;
+  /* Dark text keeps white-on-emerald contrast AA-compliant (5.9:1) */
+  --primary-foreground: #022C22;
+  --background: #F8F9FA;
+  --foreground: #111827;
+  --card: #FFFFFF;
+  --card-foreground: #111827;
+  --popover: #FFFFFF;
+  --popover-foreground: #111827;
+  --secondary: #F3F4F6;
+  --secondary-foreground: #111827;
+  --muted: #F3F4F6;
+  --muted-foreground: #6B7280;
+  --muted-soft: #9CA3AF;
+  --soft-green: #D1FAE5;
+  --soft-green-foreground: #065F46;
+  --very-soft-green: #ECFDF5;
+  --accent: #F3F4F6;
+  --accent-foreground: #111827;
+  --destructive: #DC2626;
+  --border: #E5E7EB;
+  --border-light: #F0F0F1;
+  --input: #D1D5DB;
+  --danger: #DC2626;
+  --danger-foreground: #FFFFFF;
+  --danger-soft: #FEE2E2;
+  --warning: #B45309;
+  --warning-foreground: #92400E;
+  --warning-soft: #FEF3C7;
+  --info: #0369A1;
+  --info-soft: #E0F2FE;
+  --ring: #10B981;
+  --chart-1: #10B981;
+  --chart-2: #14B8A6;
+  --chart-3: #F59E0B;
+  --chart-4: #0EA5E9;
+  --chart-5: #F43F5E;
+  --radius: 0.75rem;
+  --sidebar: #0A1714;
+  --sidebar-foreground: #9CA3AF;
+  --sidebar-hover: #14261F;
+  --sidebar-accent: rgb(255 255 255 / 10%);
+  --sidebar-accent-foreground: #FFFFFF;
+  --sidebar-primary: #10B981;
+  --sidebar-primary-foreground: #022C22;
+  --sidebar-border: rgb(255 255 255 / 8%);
+  --sidebar-ring: #10B981;
+}
+
+.dark {
+  --primary: #10B981;
+  --primary-foreground: #022C22;
+  --background: #0F1211;
+  --foreground: #F3F4F6;
+  --card: #171B1A;
+  --card-foreground: #F3F4F6;
+  --popover: #171B1A;
+  --popover-foreground: #F3F4F6;
+  --secondary: #232826;
+  --secondary-foreground: #F3F4F6;
+  --muted: #232826;
+  --muted-foreground: #9CA3AF;
+  --muted-soft: #6B7280;
+  --soft-green: rgb(16 185 129 / 16%);
+  --soft-green-foreground: #10B981;
+  --very-soft-green: rgb(16 185 129 / 8%);
+  --accent: #232826;
+  --accent-foreground: #6EE7B7;
+  --destructive: #F87171;
+  --danger: #F87171;
+  --danger-foreground: #450A0A;
+  --danger-soft: rgb(239 68 68 / 14%);
+  --warning: #FBBF24;
+  --warning-foreground: #FBBF24;
+  --warning-soft: rgb(245 158 11 / 14%);
+  --info: #38BDF8;
+  --info-soft: rgb(56 189 248 / 14%);
+  --border: rgb(255 255 255 / 10%);
+  --input: rgb(255 255 255 / 15%);
+  --ring: #10B981;
+  --chart-1: #10B981;
+  --chart-2: #2DD4BF;
+  --chart-3: #FBBF24;
+  --chart-4: #38BDF8;
+  --chart-5: #FB7185;
+  --sidebar: #0A1714;
+  --sidebar-foreground: #9CA3AF;
+  --sidebar-hover: #14261F;
+  --sidebar-accent: rgb(255 255 255 / 10%);
+  --sidebar-accent-foreground: #FFFFFF;
+  --sidebar-primary: #10B981;
+  --sidebar-primary-foreground: #022C22;
+  --sidebar-border: rgb(255 255 255 / 8%);
+  --sidebar-ring: #10B981;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 22%, transparent);
+  }
+}
+
+/* --------------------- Xcel additions --------------------- */
+
+/* Keep the legacy card utility working — white cards on the slate canvas */
+@utility card-premium {
+  @apply rounded-2xl border border-border/70 bg-card shadow-card;
+}
+
+@utility header-gradient {
+  background-image: linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--primary) 8%, transparent),
+    color-mix(in oklab, var(--chart-2) 5%, transparent) 55%,
+    transparent 100%
+  );
+}
+
+.dark .header-gradient {
+  background-image: linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--primary) 14%, transparent),
+    color-mix(in oklab, var(--chart-2) 8%, transparent) 55%,
+    transparent 100%
+  );
+}
+
+@utility shadow-card {
+  box-shadow:
+    0 1px 2px rgb(15 23 42 / 0.04),
+    0 4px 14px rgb(15 23 42 / 0.05);
+}
+
+@utility shadow-card-lg {
+  box-shadow:
+    0 2px 6px rgb(15 23 42 / 0.05),
+    0 12px 32px rgb(15 23 42 / 0.09);
+}
+
+@utility shadow-sidebar-pill {
+  box-shadow: 0 8px 20px -8px rgb(5 150 105 / 0.55);
+}
+
+/* Neon emerald glow — active POS button and key primary moments */
+@utility glow-primary {
+  box-shadow:
+    0 0 0 1px rgb(16 185 129 / 0.35),
+    0 0 18px rgb(16 185 129 / 0.35),
+    0 8px 24px -8px rgb(16 185 129 / 0.55);
+}
+
+@utility hover-glow-primary {
+  &:hover {
+    box-shadow:
+      0 0 0 1px rgb(16 185 129 / 0.45),
+      0 0 22px rgb(16 185 129 / 0.45),
+      0 10px 28px -8px rgb(16 185 129 / 0.6);
+  }
+}
+
+/*
+ * Type scale (Inter) — enterprise, data-dense, utilitarian. Tiers are applied
+ * literally in components so variant overrides (sm:, md:, group-data-) win:
+ *   page title    text-2xl md:text-3xl font-bold tracking-tight text-slate-900
+ *   description   text-sm text-slate-500 mt-1
+ *   section title text-lg font-semibold text-slate-900 tracking-tight
+ *   table head    text-xs font-semibold text-slate-500 uppercase tracking-wider
+ *   primary data  text-sm font-medium text-slate-900
+ *   meta data     text-xs text-slate-500
+ *   numbers       text-sm font-semibold tabular-nums text-slate-900
+ *   badges        text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full
+ *   utility text  text-xs font-medium text-slate-500
+ *   buttons       text-sm font-semibold
+ */
+
+@utility text-gradient-primary {
+  @apply bg-gradient-to-r from-teal-600 to-emerald-500 bg-clip-text text-transparent dark:from-teal-400 dark:to-emerald-400;
+}
+
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* POS terminal surfaces — Inter + tight tracking (same family as the app) */
+.pos-font {
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  letter-spacing: -0.025em;
+}
+
+/* POS receipt printing — show only the receipt block */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .receipt-print,
+  .receipt-print * {
+    visibility: visible;
+  }
+  .receipt-print {
+    position: absolute;
+    inset: 0;
+    width: auto;
+    margin: 0;
+    padding: 24px;
+    background: #fff;
+    color: #000;
+    max-height: none !important;
+    overflow: visible !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+}

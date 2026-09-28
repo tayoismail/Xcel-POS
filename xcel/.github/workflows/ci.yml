@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: xcel_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/xcel_ci
+      DIRECT_URL: postgres://postgres:postgres@localhost:5432/xcel_ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      # Applies prisma/schema.prisma to the throwaway service database,
+      # then proves the drift guard passes on a synced database...
+      - name: Push schema to CI database
+        run: npx prisma db push --skip-generate
+
+      - name: Schema drift check (must pass when synced)
+        run: npm run db:check
+
+      # ...and the invoice-counter concurrency test end-to-end.
+      - name: Invoice counter concurrency test
+        run: npm run test:invoice
+
+      - name: Typecheck
+        run: npx tsc --noEmit

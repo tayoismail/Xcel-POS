@@ -1,0 +1,621 @@
+// Xcel POS — Prisma schema
+// Domain: multi-branch POS + inventory for retail (phone-parts style business)
+//
+// Conventions:
+//  - Money columns are Decimal(14,2) — never floats
+//  - Quantities are Int; StockLevel.quantity is allowed to go negative for now
+//  - Soft deletes: deletedAt DateTime? on User, Product, Customer, Supplier
+//  - Indexes on every FK and frequently filtered columns (status, dates, sku)
+//  - Unique constraints are scoped per business where relevant
+//    (note: with soft deletes, re-using a deleted row's SKU will conflict —
+//     enforce uniqueness in app logic if that becomes an issue)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  OWNER
+  MANAGER
+  STAFF
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum StockMovementType {
+  SALE
+  PURCHASE
+  ADJUSTMENT
+  PRODUCTION
+  RETURN
+  TRANSFER
+}
+
+enum CustomerType {
+  WALK_IN
+  REGISTERED
+}
+
+enum PurchaseStatus {
+  RECEIVED
+  PENDING
+}
+
+enum SaleStatus {
+  COMPLETED
+  REFUNDED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PAID
+  PARTIAL
+  UNPAID
+}
+
+enum PaymentMethod {
+  CASH
+  TRANSFER
+  SPLIT
+  CREDIT
+  POS
+}
+
+enum InvoiceDocKind {
+  SALE
+  INVOICE
+  QUOTATION
+  PURCHASE
+}
+
+enum AccountType {
+  BANK
+  CASH
+  POS
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  CANCELLED
+}
+
+enum QuotationStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+// ---------------------------------------------------------------------------
+// Core
+// ---------------------------------------------------------------------------
+
+model Business {
+  id        String   @id @default(uuid())
+  name      String
+  logo      String?
+  currency  String   @default("NGN")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locations       Location[]
+  users           User[]
+  categories      Category[]
+  products        Product[]
+  customers       Customer[]
+  suppliers       Supplier[]
+  purchases       Purchase[]
+  sales           Sale[]
+  invoices        Invoice[]
+  quotations      Quotation[]
+  expenses        Expense[]
+  bankAccounts    BankAccount[]
+  productionLogs  ProductionLog[]
+  auditLogs       AuditLog[]
+  invoiceCounters InvoiceCounter[]
+}
+
+model Location {
+  id         String  @id @default(uuid())
+  businessId String
+  name       String
+  address    String?
+
+  business        Business        @relation(fields: [businessId], references: [id])
+  stockLevels     StockLevel[]
+  stockMovements  StockMovement[]
+  sales           Sale[]
+  purchases       Purchase[]
+  productionLogs  ProductionLog[]
+
+  @@index([businessId])
+}
+
+model User {
+  id          String    @id @default(uuid())
+  email       String    @unique
+  name        String
+  role        UserRole  @default(STAFF)
+  avatarUrl   String?
+  businessId  String
+  // Link to the Supabase auth user (auth.users.id), populated at sign-up
+  authUserId  String?   @unique
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  business        Business         @relation(fields: [businessId], references: [id])
+  stockMovements  StockMovement[]  @relation("StockMovementCreatedBy")
+  sales           Sale[]           @relation("SaleSoldBy")
+  purchases       Purchase[]       @relation("PurchaseAddedBy")
+  expenses        Expense[]        @relation("ExpenseCreatedBy")
+  productionLogs  ProductionLog[]  @relation("ProductionLogCreatedBy")
+  auditLogs       AuditLog[]
+
+  @@index([businessId])
+  @@index([role])
+}
+
+// ---------------------------------------------------------------------------
+// Catalog
+// ---------------------------------------------------------------------------
+
+model Category {
+  id         String  @id @default(uuid())
+  businessId String
+  name       String
+
+  business Business  @relation(fields: [businessId], references: [id])
+  products Product[]
+
+  @@unique([businessId, name])
+  @@index([businessId])
+}
+
+model Product {
+  id          String        @id @default(uuid())
+  businessId  String
+  name        String
+  sku         String
+  barcode     String?
+  categoryId  String?
+  brand       String?
+  description String?
+  price       Decimal       @db.Decimal(14, 2)
+  costPrice   Decimal       @default(0) @db.Decimal(14, 2)
+  unit        String        @default("pcs")
+  // Low-stock alert threshold (quantity at which to alert)
+  alertAt     Int           @default(5)
+  status      ProductStatus @default(ACTIVE)
+  imageUrl    String?
+  deletedAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  business        Business         @relation(fields: [businessId], references: [id])
+  category        Category?        @relation(fields: [categoryId], references: [id])
+  stockLevels     StockLevel[]
+  stockMovements  StockMovement[]
+  saleItems       SaleItem[]
+  purchaseItems   PurchaseItem[]
+  productionLogs  ProductionLog[]
+  invoiceItems    InvoiceItem[]
+  quotationItems  QuotationItem[]
+
+  @@unique([businessId, sku])
+  @@unique([businessId, barcode])
+  @@index([businessId])
+  @@index([categoryId])
+  @@index([status])
+  @@index([name])
+}
+
+// ---------------------------------------------------------------------------
+// Stock
+// ---------------------------------------------------------------------------
+
+model StockLevel {
+  id         String @id @default(uuid())
+  productId  String
+  locationId String
+  // Negative quantities are allowed for now; controlled via app logic later
+  quantity   Int    @default(0)
+
+  product  Product  @relation(fields: [productId], references: [id])
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@unique([productId, locationId])
+  @@index([productId])
+  @@index([locationId])
+}
+
+model StockMovement {
+  id          String            @id @default(uuid())
+  productId   String
+  locationId  String
+  type        StockMovementType
+  quantity    Int
+  // Polymorphic reference (saleId / purchaseId / transferId / …)
+  referenceId String?
+  notes       String?
+  createdById String
+  createdAt   DateTime          @default(now())
+
+  product   Product  @relation(fields: [productId], references: [id])
+  location  Location @relation(fields: [locationId], references: [id])
+  createdBy User     @relation("StockMovementCreatedBy", fields: [createdById], references: [id])
+
+  @@index([productId])
+  @@index([locationId])
+  @@index([type])
+  @@index([createdAt])
+  @@index([referenceId])
+}
+
+// ---------------------------------------------------------------------------
+// People
+// ---------------------------------------------------------------------------
+
+model Customer {
+  id         String       @id @default(uuid())
+  businessId String
+  name       String
+  phone      String?
+  email      String?
+  type       CustomerType @default(REGISTERED)
+  deletedAt  DateTime?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  business   Business    @relation(fields: [businessId], references: [id])
+  sales      Sale[]
+  invoices   Invoice[]
+  quotations Quotation[]
+
+  @@index([businessId])
+  @@index([type])
+  @@index([phone])
+}
+
+model Supplier {
+  id         String    @id @default(uuid())
+  businessId String
+  name       String
+  phone      String?
+  email      String?
+  address    String?
+  deletedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  business  Business   @relation(fields: [businessId], references: [id])
+  purchases Purchase[]
+
+  @@index([businessId])
+  @@index([name])
+}
+
+// ---------------------------------------------------------------------------
+// Purchasing
+// ---------------------------------------------------------------------------
+
+model Purchase {
+  id            String         @id @default(uuid())
+  businessId    String
+  locationId    String
+  referenceNo   String
+  supplierId    String?
+  status        PurchaseStatus @default(PENDING)
+  paymentStatus PaymentStatus  @default(UNPAID)
+  grandTotal    Decimal        @default(0) @db.Decimal(14, 2)
+  paymentDue    DateTime?
+  notes         String?
+  addedById     String
+  date          DateTime       @default(now())
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  business  Business       @relation(fields: [businessId], references: [id])
+  location  Location       @relation(fields: [locationId], references: [id])
+  supplier  Supplier?      @relation(fields: [supplierId], references: [id])
+  addedBy   User           @relation("PurchaseAddedBy", fields: [addedById], references: [id])
+  items     PurchaseItem[]
+  payments  Payment[]
+
+  @@unique([businessId, referenceNo])
+  @@index([businessId])
+  @@index([locationId])
+  @@index([supplierId])
+  @@index([status])
+  @@index([date])
+}
+
+model PurchaseItem {
+  id         String  @id @default(uuid())
+  purchaseId String
+  productId  String
+  qty        Int
+  unitCost   Decimal @db.Decimal(14, 2)
+  subtotal   Decimal @db.Decimal(14, 2)
+
+  purchase Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id])
+
+  @@index([purchaseId])
+  @@index([productId])
+}
+
+// ---------------------------------------------------------------------------
+// Selling
+// ---------------------------------------------------------------------------
+
+model Sale {
+  id            String        @id @default(uuid())
+  businessId    String
+  locationId    String
+  invoiceNo     String
+  customerId    String?
+  soldById      String
+  status        SaleStatus    @default(COMPLETED)
+  paymentMethod PaymentMethod @default(CASH)
+  paymentStatus PaymentStatus @default(PAID)
+  totalAmount   Decimal       @db.Decimal(14, 2)
+  totalPaid     Decimal       @default(0) @db.Decimal(14, 2)
+  due           Decimal       @default(0) @db.Decimal(14, 2)
+  itemsCount    Int           @default(0)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  business  Business    @relation(fields: [businessId], references: [id])
+  location  Location    @relation(fields: [locationId], references: [id])
+  customer  Customer?   @relation(fields: [customerId], references: [id])
+  soldBy    User        @relation("SaleSoldBy", fields: [soldById], references: [id])
+  items     SaleItem[]
+  payments  Payment[]
+  invoices  Invoice[]
+
+  @@unique([businessId, invoiceNo])
+  @@index([businessId])
+  @@index([locationId])
+  @@index([customerId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([soldById])
+}
+
+/// Atomic per-business document-number reservations (INV-, BILL-, QTN-, PUR-).
+/// One row per (business, kind); nextNumber is the next value to issue.
+model InvoiceCounter {
+  id         String         @id @default(uuid())
+  businessId String
+  kind       InvoiceDocKind
+  nextNumber Int            @default(1)
+  updatedAt  DateTime       @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id])
+
+  @@unique([businessId, kind])
+}
+
+model SaleItem {
+  id        String  @id @default(uuid())
+  saleId    String
+  productId String
+  qty       Int
+  unitPrice Decimal @db.Decimal(14, 2)
+  discount  Decimal @default(0) @db.Decimal(14, 2)
+  subtotal  Decimal @db.Decimal(14, 2)
+
+  sale    Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([saleId])
+  @@index([productId])
+}
+
+model Payment {
+  id         String        @id @default(uuid())
+  saleId     String?
+  purchaseId String?
+  method     PaymentMethod
+  provider   String?
+  amount     Decimal       @db.Decimal(14, 2)
+  accountId  String?
+  reference  String?
+  createdAt  DateTime      @default(now())
+
+  sale     Sale?        @relation(fields: [saleId], references: [id])
+  purchase Purchase?    @relation(fields: [purchaseId], references: [id])
+  account  BankAccount? @relation(fields: [accountId], references: [id])
+
+  @@index([saleId])
+  @@index([purchaseId])
+  @@index([accountId])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Documents (invoices / quotations)
+// ---------------------------------------------------------------------------
+
+model Invoice {
+  id          String        @id @default(uuid())
+  businessId  String
+  saleId      String?
+  customerId  String?
+  number      String
+  status      InvoiceStatus @default(DRAFT)
+  issueDate   DateTime      @default(now())
+  dueDate     DateTime?
+  totalAmount Decimal       @db.Decimal(14, 2)
+  amountPaid  Decimal       @default(0) @db.Decimal(14, 2)
+  notes       String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  business Business      @relation(fields: [businessId], references: [id])
+  sale     Sale?         @relation(fields: [saleId], references: [id])
+  customer Customer?     @relation(fields: [customerId], references: [id])
+  items    InvoiceItem[]
+
+  @@unique([businessId, number])
+  @@index([businessId])
+  @@index([saleId])
+  @@index([customerId])
+  @@index([status])
+}
+
+model InvoiceItem {
+  id        String  @id @default(uuid())
+  invoiceId String
+  productId String?
+  name      String
+  qty       Int     @default(1)
+  unitPrice Decimal @db.Decimal(14, 2)
+  subtotal  Decimal @db.Decimal(14, 2)
+
+  invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id])
+
+  @@index([invoiceId])
+  @@index([productId])
+}
+
+model Quotation {
+  id          String          @id @default(uuid())
+  businessId  String
+  customerId  String?
+  number      String
+  status      QuotationStatus @default(DRAFT)
+  issueDate   DateTime        @default(now())
+  validUntil  DateTime?
+  totalAmount Decimal         @db.Decimal(14, 2)
+  notes       String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  business Business       @relation(fields: [businessId], references: [id])
+  customer Customer?      @relation(fields: [customerId], references: [id])
+  items    QuotationItem[]
+
+  @@unique([businessId, number])
+  @@index([businessId])
+  @@index([customerId])
+  @@index([status])
+}
+
+model QuotationItem {
+  id          String  @id @default(uuid())
+  quotationId String
+  productId   String?
+  name        String
+  qty         Int     @default(1)
+  unitPrice   Decimal @db.Decimal(14, 2)
+  subtotal    Decimal @db.Decimal(14, 2)
+
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  product   Product?  @relation(fields: [productId], references: [id])
+
+  @@index([quotationId])
+  @@index([productId])
+}
+
+// ---------------------------------------------------------------------------
+// Money & operations
+// ---------------------------------------------------------------------------
+
+model Expense {
+  id          String   @id @default(uuid())
+  businessId  String
+  category    String
+  description String?
+  amount      Decimal  @db.Decimal(14, 2)
+  accountId   String?
+  createdById String
+  date        DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  business  Business     @relation(fields: [businessId], references: [id])
+  account   BankAccount? @relation(fields: [accountId], references: [id])
+  createdBy User         @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
+
+  @@index([businessId])
+  @@index([category])
+  @@index([date])
+}
+
+model BankAccount {
+  id            String      @id @default(uuid())
+  businessId    String
+  name          String
+  type          AccountType
+  accountNumber String?
+  balance       Decimal     @default(0) @db.Decimal(14, 2)
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  business  Business   @relation(fields: [businessId], references: [id])
+  payments  Payment[]
+  expenses  Expense[]
+
+  @@index([businessId])
+  @@index([type])
+}
+
+model ProductionLog {
+  id          String   @id @default(uuid())
+  businessId  String
+  productId   String
+  locationId  String?
+  quantity    Int
+  notes       String?
+  createdById String
+  createdAt   DateTime @default(now())
+
+  business  Business  @relation(fields: [businessId], references: [id])
+  product   Product   @relation(fields: [productId], references: [id])
+  location  Location? @relation(fields: [locationId], references: [id])
+  createdBy User      @relation("ProductionLogCreatedBy", fields: [createdById], references: [id])
+
+  @@index([businessId])
+  @@index([productId])
+  @@index([locationId])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  businessId String?
+  userId     String?
+  action     String
+  entity     String
+  entityId   String?
+  meta       Json?
+  createdAt  DateTime @default(now())
+
+  business Business? @relation(fields: [businessId], references: [id])
+  user     User?     @relation(fields: [userId], references: [id])
+
+  @@index([businessId])
+  @@index([userId])
+  @@index([entity])
+  @@index([entityId])
+  @@index([createdAt])
+}
