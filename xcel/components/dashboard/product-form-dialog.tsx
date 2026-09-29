@@ -69,13 +69,13 @@ export function ProductFormDialog({
               name: product.name,
               sku: product.sku,
               barcode: product.barcode ?? "",
-              categoryId: "",
+              categoryId: product.categoryId ?? "",
               brand: product.brand ?? "",
               price: product.price,
-              costPrice: "",
+              costPrice: product.costPrice,
               alertAt: String(product.alertAt),
               status: product.status,
-              description: "",
+              description: product.description ?? "",
             }
           : emptyForm,
       );
@@ -122,8 +122,12 @@ export function ProductFormDialog({
         categoryId: form.categoryId || null,
         brand: form.brand.trim() || null,
         price: form.price,
-        costPrice: form.costPrice || "0",
-        alertAt: Number(form.alertAt) || 5,
+        costPrice: form.costPrice.trim() || "0",
+        // `Number("") || 5` would turn a legitimate 0 into 5 — treat blank/invalid as default.
+        alertAt:
+          form.alertAt.trim() !== "" && Number.isFinite(Number(form.alertAt))
+            ? Math.max(0, Math.trunc(Number(form.alertAt)))
+            : 5,
         status: form.status,
         description: form.description.trim() || null,
       };
@@ -142,6 +146,10 @@ export function ProductFormDialog({
       });
       onSaved();
       onOpenChange(false);
+    } catch {
+      toast.error(isEdit ? "Update failed" : "Couldn't create product", {
+        description: "Network error — please try again.",
+      });
     } finally {
       setSaving(false);
     }

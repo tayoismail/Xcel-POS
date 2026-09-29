@@ -25,18 +25,31 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const profile = await prisma.user.findFirst({
-    where: { OR: [{ authUserId: user.id }, { email: user.email ?? "" }], deletedAt: null },
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      role: true,
-      avatarUrl: true,
-      businessId: true,
-      business: { select: { name: true } },
-    },
+  const select = {
+    id: true,
+    email: true,
+    name: true,
+    role: true,
+    avatarUrl: true,
+    businessId: true,
+    business: { select: { name: true } },
+  } as const;
+
+  // Primary: the profile linked to this auth account.
+  let profile = await prisma.user.findFirst({
+    where: { authUserId: user.id, deletedAt: null },
+    select,
   });
+
+  // Fallback for profiles created but not yet linked: only accept it when
+  // Supabase has confirmed the email — otherwise anyone who signs up with a
+  // victim's address (before confirming it) would inherit their profile.
+  if (!profile && user.email && user.email_confirmed_at) {
+    profile = await prisma.user.findFirst({
+      where: { email: user.email, authUserId: null, deletedAt: null },
+      select,
+    });
+  }
   if (!profile) return null;
 
   return {

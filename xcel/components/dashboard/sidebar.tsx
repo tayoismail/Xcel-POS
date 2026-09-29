@@ -54,7 +54,14 @@ type NavSection = {
 
 const NAV: NavSection[] = [
   {
-    items: [{ href: "/dashboard", label: "Dashboard", icon: LayoutDashboard }],
+    items: [
+      {
+        href: "/dashboard",
+        label: "Dashboard",
+        icon: LayoutDashboard,
+        roles: ["OWNER", "MANAGER"],
+      },
+    ],
   },
   {
     label: "Sales & Inventory",
@@ -62,8 +69,8 @@ const NAV: NavSection[] = [
       { href: "/dashboard/pos", label: "POS Sales", icon: ScanBarcode },
       { href: "/dashboard/invoices", label: "Invoices", icon: FileText, roles: ["OWNER", "MANAGER"] },
       { href: "/dashboard/purchases", label: "Purchases", icon: ShoppingCart, roles: ["OWNER", "MANAGER"] },
-      { href: "/dashboard/products", label: "Products", icon: Boxes },
-      { href: "/dashboard/inventory", label: "Stock Manager", icon: ArrowLeftRight },
+      { href: "/dashboard/products", label: "Products", icon: Boxes, roles: ["OWNER", "MANAGER"] },
+      { href: "/dashboard/inventory", label: "Stock Manager", icon: ArrowLeftRight, roles: ["OWNER", "MANAGER"] },
       { href: "/dashboard/production", label: "Production", icon: Factory, roles: ["OWNER", "MANAGER"] },
       { href: "/dashboard/quotations", label: "Quotations", icon: ReceiptText, roles: ["OWNER", "MANAGER"] },
     ],
@@ -72,14 +79,14 @@ const NAV: NavSection[] = [
     label: "Accounting",
     items: [
       { href: "/dashboard/expenses", label: "Expenses", icon: Banknote, roles: ["OWNER", "MANAGER"] },
-      { href: "/dashboard/bank", label: "Bank & Cash Accounts", icon: Package },
+      { href: "/dashboard/bank", label: "Bank & Cash Accounts", icon: Package, roles: ["OWNER", "MANAGER"] },
       { href: "/dashboard/reports", label: "Reports", icon: BarChart3, roles: ["OWNER", "MANAGER"] },
     ],
   },
   {
     label: "Business",
     items: [
-      { href: "/dashboard/customers", label: "Customers", icon: Users },
+      { href: "/dashboard/customers", label: "Customers", icon: Users, roles: ["OWNER", "MANAGER"] },
       { href: "/dashboard/branches", label: "Branches", icon: Store, roles: ["OWNER"] },
       { href: "/dashboard/settings", label: "Settings", icon: Settings2, roles: ["OWNER", "MANAGER"] },
     ],

@@ -104,14 +104,20 @@ export function PosClient({
   }, []);
 
   // --------------------------------------------------------- data load
+  // Monotonic sequence — only the newest request may write product state,
+  // so a slow response can never resurrect results for an old query.
+  const productSeq = useRef(0);
   const loadProducts = useCallback(
     async (search: string, categoryId: string, locId: string) => {
+      const seq = ++productSeq.current;
       setProductsLoading(true);
       try {
         const rows = await posSearchProductsAction({ search, categoryId, locationId: locId || undefined });
+        if (seq !== productSeq.current) return;
         setProducts(rows);
         setOnline(true);
       } catch {
+        if (seq !== productSeq.current) return;
         setOnline(false);
         setPendingSync((n) => n + 1);
         const stamp = Date.now();
@@ -120,7 +126,7 @@ export function PosClient({
           toast.error("Couldn't load products — check your connection.");
         }
       } finally {
-        setProductsLoading(false);
+        if (seq === productSeq.current) setProductsLoading(false);
       }
     },
     [],
@@ -136,6 +142,10 @@ export function PosClient({
   }, []);
 
   useEffect(() => {
+    // Invalidate any in-flight response for the previous query, then flag
+    // loading so Enter can't add a stale row during the debounce.
+    productSeq.current++;
+    setProductsLoading(true);
     const t = setTimeout(() => {
       void loadProducts(productSearch, activeCategory, locationId);
     }, 200);
@@ -269,11 +279,15 @@ export function PosClient({
   }, [cart, totals.total, businessName]);
 
   // -------------------------------------------------------- customer ui
+  const customerSeq = useRef(0);
   useEffect(() => {
     if (!customerOpen) return;
+    const seq = ++customerSeq.current;
     const t = setTimeout(() => {
       void posSearchCustomersAction(customerQuery)
-        .then(setCustomerResults)
+        .then((rows) => {
+          if (seq === customerSeq.current) setCustomerResults(rows);
+        })
         .catch(() => {
           /* transient network issue — keep previous results */
         });
@@ -286,17 +300,22 @@ export function PosClient({
     kind: PaymentKind,
     parts: { method: PaymentKind; amount: number; provider?: string | null }[],
   ) {
-    const paidTotal = parts.reduce((s, p) => s + p.amount, 0);
-    if (paidTotal + 0.001 < totals.total && kind !== "CREDIT") {
+    const rawPaid = parts.reduce((s, p) => s + p.amount, 0);
+    // Split sales may leave a balance due; a single cash payment must cover
+    // the total (underpaying belongs in the credit flow).
+    if (kind !== "CREDIT" && kind !== "SPLIT" && rawPaid + 0.001 < totals.total) {
       toast.error("Payments don't cover the total");
       return;
     }
-    if (paidTotal > totals.total + 0.001) {
-      toast.error("Payments exceed the total payable", {
-        description: "Reduce a payment amount before completing the sale.",
-      });
-      return;
+    // Overpay is change handed back — cap the recorded payments at the total.
+    let excess = Math.max(0, rawPaid - totals.total);
+    const payments = parts.map((p) => ({ ...p }));
+    for (let i = payments.length - 1; i >= 0 && excess > 0.001; i--) {
+      const cut = Math.min(payments[i].amount, excess);
+      payments[i].amount = Number((payments[i].amount - cut).toFixed(2));
+      excess = Number((excess - cut).toFixed(2));
     }
+    const kept = payments.filter((p) => p.amount > 0.001);
     setProcessing(true);
     try {
       const res = await checkoutAction({
@@ -312,7 +331,7 @@ export function PosClient({
         })),
         overallDiscount: totals.overall.toFixed(2),
         paymentMethod: kind,
-        payments: parts.map((p) => ({ method: p.method, amount: p.amount.toFixed(2), provider: p.provider ?? null })),
+        payments: kept.map((p) => ({ method: p.method, amount: p.amount.toFixed(2), provider: p.provider ?? null })),
         allowNegative: forceNegative,
       });
       if (!res.ok) {
@@ -320,10 +339,19 @@ export function PosClient({
         toast.error("Checkout failed", { description: res.error });
         return;
       }
-      const receiptRes = await getReceiptAction(res.saleId!);
-      setSuccess(receiptRes.ok ? receiptRes.receipt : null);
+      // The sale is committed at this point — a receipt hiccup must never be
+      // reported as a failed checkout (which would sell the item twice).
+      let receiptRes: Awaited<ReturnType<typeof getReceiptAction>> | null = null;
+      try {
+        receiptRes = await getReceiptAction(res.saleId!);
+      } catch {
+        receiptRes = null;
+      }
+      setSuccess(receiptRes?.ok ? receiptRes.receipt : null);
       toast.success("Sale completed", {
-        description: receiptRes.ok ? `${receiptRes.receipt.invoiceNo} · ${naira(Number(receiptRes.receipt.totals.total))}` : undefined,
+        description: receiptRes?.ok
+          ? `${receiptRes.receipt.invoiceNo} · ${naira(Number(receiptRes.receipt.totals.total))}`
+          : "The receipt couldn't be loaded — reopen it from Sales.",
       });
       setCart([]);
       setOverallDiscount("");
@@ -409,9 +437,9 @@ export function PosClient({
         value={productSearch}
         onChange={(e) => setProductSearch(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && products.length > 0) {
-            addToCart(products[0]);
-            setProductSearch("");
+    if (e.key === "Enter" && products.length > 0 && !productsLoading) {
+      addToCart(products[0]);
+      setProductSearch("");
           }
         }}
         placeholder="Enter product name / SKU / code"
@@ -423,7 +451,7 @@ export function PosClient({
   );
 
   return (
-    <div className="pos-font flex h-screen w-full flex-col overflow-hidden bg-background text-foreground">
+    <div className="pos-font flex h-screen w-full flex-col overflow-hidden bg-[#E9EDF2] text-foreground dark:bg-[#0A0C0B]">
       {/* ================================================ 2. TOP HEADER */}
       <header className="flex h-16 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-4">
         {/* Left */}
@@ -450,7 +478,15 @@ export function PosClient({
           <div className="relative">
             <select
               value={locationId}
-              onChange={(e) => setLocationId(e.target.value)}
+              onChange={(e) => {
+    const next = e.target.value;
+    if (next !== locationId && cart.length > 0) {
+      toast.info("Location changed", {
+        description: `${cart.length} item${cart.length === 1 ? "" : "s"} stay in the cart — stock is now checked against the new location.`,
+      });
+    }
+    setLocationId(next);
+  }}
               className="h-9 appearance-none rounded-full border border-border bg-background pr-8 pl-4 text-sm font-medium text-slate-900 dark:text-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/15"
               aria-label="Location"
             >
@@ -517,10 +553,10 @@ export function PosClient({
 
       {/* =========================================== 4. MAIN CONTENT */}
       <div className="flex min-h-0 flex-1 overflow-hidden px-4 pb-4">
-        {/* ------------------------------------- A. LEFT: cart (~46%) */}
+        {/* ------------------------------------- A. LEFT: cart (~58%) */}
         <div
           className={
-            "flex min-h-0 min-w-0 flex-col rounded-xl border border-border bg-card lg:mr-5 lg:w-[54%] lg:flex-none " +
+            "flex min-h-0 min-w-0 flex-col rounded-xl border border-border bg-[#F4F6F9] lg:mr-5 lg:w-[58%] lg:flex-none dark:bg-[#141817] " +
             (pane === "cart" ? "w-full" : "hidden lg:flex")
           }
         >
@@ -734,7 +770,7 @@ export function PosClient({
         {/* ---------------------------------- B. RIGHT: products (~54%) */}
         <div
           className={
-            "flex min-h-0 min-w-0 flex-1 flex-col rounded-xl border border-border bg-card " +
+            "flex min-h-0 min-w-0 flex-1 flex-col " +
             (pane === "products" ? "flex" : "hidden lg:flex")
           }
         >

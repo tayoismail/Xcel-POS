@@ -5,10 +5,10 @@ import { toast } from "sonner";
 
 import {
   createExpenseAction,
-  EXPENSE_CATEGORIES,
   listExpenseAccountsAction,
   type AccountOption,
 } from "@/app/actions/expenses";
+import { EXPENSE_CATEGORIES } from "@/lib/expense-categories";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -97,6 +97,8 @@ export function ExpenseFormDialog({
       });
       onSaved();
       onOpenChange(false);
+    } catch {
+      toast.error("Couldn't record expense", { description: "Check your connection and try again." });
     } finally {
       setSaving(false);
     }

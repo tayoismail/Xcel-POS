@@ -1,12 +1,20 @@
 import { Store } from "lucide-react";
+import { redirect } from "next/navigation";
 
+import { getSessionUser } from "@/lib/auth";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 
 export const metadata = { title: "Branches" };
 
-export default function BranchesPage() {
+export default async function BranchesPage() {
+  const session = await getSessionUser();
+  if (!session) redirect("/login");
+
+  // Staff are strictly POS-only (mirrors the sidebar visibility rule)
+  if (session.role === "STAFF") redirect("/dashboard");
+
   return (
     <div className="space-y-6">
       <PageHeader

@@ -1,27 +1,23 @@
-import { Settings2 } from "lucide-react";
+import { redirect } from "next/navigation";
 
-import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
-import { Card, CardContent } from "@/components/ui/card";
+import { SettingsTabs } from "@/components/dashboard/settings/settings-tabs";
+import { getSessionUser } from "@/lib/auth";
 
 export const metadata = { title: "Settings" };
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  const session = await getSessionUser();
+  if (!session) redirect("/login");
+  if (session.role === "STAFF") redirect("/dashboard");
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Settings"
-        description="Business profile, taxes, receipts and user management."
+        description="Manage your team, product categories and bulk uploads."
       />
-      <Card>
-        <CardContent>
-          <EmptyState
-            icon={Settings2}
-            title="Settings are coming soon"
-            description="Business profile, tax rules, receipt branding and team permissions will be managed here."
-          />
-        </CardContent>
-      </Card>
+      <SettingsTabs role={session.role} currentUserId={session.id} />
     </div>
   );
 }

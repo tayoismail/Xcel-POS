@@ -19,6 +19,15 @@ async function requireSession() {
 const money = (n: number) => new Prisma.Decimal(n.toFixed(2));
 const isManagerRole = (role: string) => role === "OWNER" || role === "MANAGER";
 
+/** Manager-only read guard — blocks staff calling these actions directly. */
+async function requireManagerSession() {
+  const session = await requireSession();
+  if (!isManagerRole(session.role)) {
+    throw new Error("Forbidden: manager access required.");
+  }
+  return session;
+}
+
 export type InvoiceStatusFilter = "ALL" | "DRAFT" | "ISSUED" | "PAID" | "CANCELLED";
 
 export type InvoiceRow = {
@@ -93,7 +102,7 @@ export type CustomerOption = {
 };
 
 export async function listCustomerOptionsAction(): Promise<CustomerOption[]> {
-  const session = await requireSession();
+  const session = await requireManagerSession();
   return prisma.customer.findMany({
     where: { businessId: session.businessId, deletedAt: null },
     orderBy: { name: "asc" },
@@ -126,7 +135,7 @@ export async function listInvoicesAction(opts: {
   page?: number;
   pageSize?: number;
 }): Promise<InvoiceListResult> {
-  const session = await requireSession();
+  const session = await requireManagerSession();
   const page = Math.max(1, opts.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, opts.pageSize ?? 25));
   const term = opts.search?.trim();
@@ -223,7 +232,7 @@ export async function listInvoicesAction(opts: {
 export async function getInvoiceDetailAction(invoiceId: string): Promise<
   { ok: true; invoice: InvoiceDetail } | { ok: false; error: string }
 > {
-  const session = await requireSession();
+  const session = await requireManagerSession();
   const inv = await prisma.invoice.findFirst({
     where: { id: invoiceId, businessId: session.businessId },
     select: {
@@ -324,7 +333,7 @@ export async function createInvoiceAction(input: {
 
 /** Sales that are unpaid/partial and do not yet have an invoice. */
 export async function listCreditSalesAction(): Promise<CreditSaleRow[]> {
-  const session = await requireSession();
+  const session = await requireManagerSession();
   const sales = await prisma.sale.findMany({
     where: {
       businessId: session.businessId,

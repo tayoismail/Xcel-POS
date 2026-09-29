@@ -9,6 +9,7 @@ export const metadata = { title: "Products" };
 export default async function ProductsPage() {
   const session = await getSessionUser();
   if (!session) redirect("/login");
+  if (session.role === "STAFF") redirect("/dashboard");
 
   const initial = await listProductsAction({ page: 1, pageSize: 25 });
 

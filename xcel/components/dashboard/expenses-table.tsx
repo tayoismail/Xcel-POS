@@ -6,12 +6,12 @@ import { toast } from "sonner";
 
 import {
   deleteExpenseAction,
-  EXPENSE_CATEGORIES,
   listExpensesAction,
   type ExpenseListResult,
   type ExpenseRow,
 } from "@/app/actions/expenses";
 import { ExpenseFormDialog } from "@/components/dashboard/expense-form-dialog";
+import { EXPENSE_CATEGORIES } from "@/lib/expense-categories";
 import { EmptyState, NoResultsState } from "@/components/shared/empty-state";
 import { SearchInput } from "@/components/shared/search-input";
 import { TablePagination } from "@/components/shared/table-pagination";
@@ -81,9 +81,12 @@ export function ExpensesTable() {
 
   const firstRender = useRef(true);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Only the newest in-flight response may write state.
+  const refreshSeq = useRef(0);
 
   const refresh = useCallback(
     async (opts?: { page?: number }) => {
+      const seq = ++refreshSeq.current;
       setLoading(true);
       try {
         const res: ExpenseListResult = await listExpensesAction({
@@ -92,15 +95,19 @@ export function ExpensesTable() {
           page: opts?.page ?? page,
           pageSize,
         });
+        if (seq !== refreshSeq.current) return; // superseded by a newer request
         setRows(res.rows);
         setTotal(res.total);
         setPage(res.page);
         setPageCount(res.pageCount);
         setSum(res.sum);
       } catch {
-        toast.error("Couldn't load expenses");
+        if (seq === refreshSeq.current) {
+          setRows([]); // render the empty/error state instead of a blank table
+          toast.error("Couldn't load expenses", { description: "Please try again." });
+        }
       } finally {
-        setLoading(false);
+        if (seq === refreshSeq.current) setLoading(false);
       }
     },
     [search, category, page, pageSize],
@@ -138,6 +145,8 @@ export function ExpensesTable() {
         void refresh();
       }
       setDeleteTarget(null);
+    } catch {
+      toast.error("Delete failed", { description: "Network error — please try again." });
     } finally {
       setBusy(false);
     }

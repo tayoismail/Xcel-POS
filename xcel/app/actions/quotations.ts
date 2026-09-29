@@ -19,6 +19,15 @@ async function requireSession() {
 const money = (n: number) => new Prisma.Decimal(n.toFixed(2));
 const isManagerRole = (role: string) => role === "OWNER" || role === "MANAGER";
 
+/** Manager-only read guard — blocks staff calling these actions directly. */
+async function requireManagerSession() {
+  const session = await requireSession();
+  if (!isManagerRole(session.role)) {
+    throw new Error("Forbidden: manager access required.");
+  }
+  return session;
+}
+
 export type QuotationStatusFilter =
   | "ALL"
   | "DRAFT"
@@ -105,7 +114,7 @@ export async function listQuotationsAction(opts: {
   page?: number;
   pageSize?: number;
 }): Promise<QuotationListResult> {
-  const session = await requireSession();
+  const session = await requireManagerSession();
   const page = Math.max(1, opts.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, opts.pageSize ?? 25));
   const term = opts.search?.trim();
@@ -197,7 +206,7 @@ export async function listQuotationsAction(opts: {
 export async function getQuotationDetailAction(quotationId: string): Promise<
   { ok: true; quotation: QuotationDetail } | { ok: false; error: string }
 > {
-  const session = await requireSession();
+  const session = await requireManagerSession();
   const q = await prisma.quotation.findFirst({
     where: { id: quotationId, businessId: session.businessId },
     select: {
@@ -385,6 +394,17 @@ export async function convertQuotationToInvoiceAction(
         throw new Error("This quotation can no longer be converted.");
       }
 
+      // Atomic claim: a second convert (double-click or retry) finds the row
+      // already ACCEPTED and stops instead of creating a duplicate invoice.
+      const claimed = await tx.quotation.updateMany({
+        where: {
+          id: q.id,
+          status: { notIn: ["ACCEPTED", "REJECTED", "EXPIRED"] },
+        },
+        data: { status: "ACCEPTED" },
+      });
+      if (claimed.count === 0) throw new Error("This quotation has already been converted.");
+
       const number = await nextInvoiceNumber(tx, session.businessId);
       const inv = await tx.invoice.create({
         data: {
@@ -408,11 +428,6 @@ export async function convertQuotationToInvoiceAction(
         select: { id: true, number: true },
       });
 
-      await tx.quotation.update({
-        where: { id: q.id },
-        data: { status: "ACCEPTED" },
-      });
-
       return inv;
     });
 
@@ -421,7 +436,7 @@ export async function convertQuotationToInvoiceAction(
     return { ok: true, id: result.id, invoiceId: result.id, number: result.number };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "";
-    if (msg === "Quotation not found." || msg.includes("no longer")) {
+    if (msg === "Quotation not found." || msg.includes("no longer") || msg.includes("already been converted")) {
       return { ok: false, error: msg };
     }
     return { ok: false, error: "Could not convert quotation. Please try again." };
@@ -467,12 +482,39 @@ export async function convertQuotationToSaleAction(
         throw new Error("Custom lines without a product cannot become a sale. Convert to an invoice instead.");
       }
 
+      // Atomic claim — stops double conversion from racing two sales.
+      const claimed = await tx.quotation.updateMany({
+        where: {
+          id: q.id,
+          status: { notIn: ["ACCEPTED", "REJECTED", "EXPIRED"] },
+        },
+        data: { status: "ACCEPTED" },
+      });
+      if (claimed.count === 0) throw new Error("This quotation has already been converted.");
+
       const location = await tx.location.findFirst({
         where: { businessId: session.businessId },
         orderBy: { name: "asc" },
         select: { id: true },
       });
       if (!location) throw new Error("No location found for this business.");
+
+      // Stock check — a converted quotation must not drive stock negative
+      // (the POS checkout enforces the same rule).
+      const levels = await tx.stockLevel.findMany({
+        where: {
+          locationId: location.id,
+          productId: { in: q.items.map((i) => i.productId!) },
+        },
+        select: { productId: true, quantity: true },
+      });
+      const stockBy = new Map(levels.map((l) => [l.productId, l.quantity]));
+      for (const item of q.items) {
+        const available = stockBy.get(item.productId!) ?? 0;
+        if (available < item.qty) {
+          throw new Error(`Not enough stock for ${item.name} (${available} left).`);
+        }
+      }
 
       const total = Number(q.totalAmount);
       const sale = await tx.sale.create({
@@ -530,19 +572,27 @@ export async function convertQuotationToSaleAction(
         });
       }
 
+      // Credit the receiving cash account so this sale shows up in Bank too.
+      const cashAccount = await tx.bankAccount.findFirst({
+        where: { businessId: session.businessId, isActive: true, type: "CASH" },
+        orderBy: { name: "asc" },
+        select: { id: true },
+      });
       await tx.payment.create({
         data: {
           saleId: sale.id,
           method: "CASH",
           amount: q.totalAmount,
+          accountId: cashAccount?.id ?? null,
           reference: `RCPT-${invoiceNo}`,
         },
       });
-
-      await tx.quotation.update({
-        where: { id: q.id },
-        data: { status: "ACCEPTED" },
-      });
+      if (cashAccount) {
+        await tx.bankAccount.update({
+          where: { id: cashAccount.id },
+          data: { balance: { increment: q.totalAmount } },
+        });
+      }
 
       return { saleId: sale.id, invoiceNo: sale.invoiceNo, total };
       },
@@ -557,8 +607,10 @@ export async function convertQuotationToSaleAction(
     if (
       msg === "Quotation not found." ||
       msg.includes("no longer") ||
+      msg.includes("already been converted") ||
       msg.includes("Custom lines") ||
-      msg.includes("No location")
+      msg.includes("No location") ||
+      msg.includes("Not enough stock")
     ) {
       return { ok: false, error: msg };
     }

@@ -16,6 +16,15 @@ async function requireSession() {
 
 const money = (n: number) => new Prisma.Decimal(n.toFixed(2));
 
+/** Which account type receives money for each payment method. */
+const METHOD_ACCOUNT_TYPE: Record<string, "BANK" | "CASH" | "POS"> = {
+  CASH: "CASH",
+  POS: "POS",
+  TRANSFER: "BANK",
+  CREDIT: "CASH",
+  SPLIT: "CASH",
+};
+
 /* ------------------------------------------------------------- catalog */
 
 export type PosProduct = {
@@ -223,11 +232,33 @@ export async function checkoutAction(
         if (overallDiscount > subtotal) throw new PosError("Overall discount exceeds subtotal.");
         const total = subtotal - overallDiscount;
 
-        const paid = input.payments.reduce((s, p) => s + Number(p.amount), 0);
-        if (paid > total + 0.001) throw new PosError("Payments exceed total payable.");
-        if (paid <= 0 && input.paymentMethod !== "CREDIT") {
+        // Payments: overpay is change handed back to the customer, so the
+        // recorded payments are capped at the total. Split sales may be
+        // partial (the rest stays due); a single cash payment must cover
+        // the total — underpaying belongs in credit/split.
+        const rawPaid = input.payments.reduce((s, p) => s + (Number.isFinite(Number(p.amount)) ? Number(p.amount) : 0), 0);
+        if (rawPaid <= 0 && input.paymentMethod !== "CREDIT") {
           throw new PosError("Record at least one payment.");
         }
+        if (
+          input.paymentMethod !== "CREDIT" &&
+          input.paymentMethod !== "SPLIT" &&
+          rawPaid + 0.001 < total
+        ) {
+          throw new PosError("Payment doesn't cover the total payable.");
+        }
+        let excess = Math.max(0, rawPaid - total);
+        const payments = input.payments.map((p) => ({
+          ...p,
+          amount: Number.isFinite(Number(p.amount)) ? Number(p.amount) : 0,
+        }));
+        for (let i = payments.length - 1; i >= 0 && excess > 0.001; i--) {
+          const cut = Math.min(payments[i].amount, excess);
+          payments[i] = { ...payments[i], amount: Number((payments[i].amount - cut).toFixed(2)) };
+          excess = Number((excess - cut).toFixed(2));
+        }
+        const keptPayments = payments.filter((p) => p.amount > 0.001);
+        const paid = Number(keptPayments.reduce((s, p) => s + p.amount, 0).toFixed(2));
         const due = Math.max(0, total - paid);
 
         // Stock policy: block negatives unless a manager forces it
@@ -272,6 +303,32 @@ export async function checkoutAction(
           select: { id: true, invoiceNo: true },
         });
 
+        // Default the receiving account by method — the POS never picks one,
+        // but balances must still track every naira that comes in.
+        const accountPayments = [...keptPayments];
+        const neededTypes = [
+          ...new Set(
+            accountPayments
+              .filter((p) => !p.accountId)
+              .map((p) => METHOD_ACCOUNT_TYPE[p.method] ?? "CASH"),
+          ),
+        ];
+        if (neededTypes.length) {
+          const rows = await tx.bankAccount.findMany({
+            where: { businessId: session.businessId, isActive: true, type: { in: neededTypes } },
+            orderBy: [{ type: "asc" }, { name: "asc" }],
+            select: { id: true, type: true },
+          });
+          const defaults = new Map<string, string>();
+          for (const r of rows) if (!defaults.has(r.type)) defaults.set(r.type, r.id);
+          for (let i = 0; i < accountPayments.length; i++) {
+            const p = accountPayments[i];
+            if (p.accountId) continue;
+            const def = defaults.get(METHOD_ACCOUNT_TYPE[p.method] ?? "CASH");
+            if (def) accountPayments[i] = { ...p, accountId: def };
+          }
+        }
+
         // One parallel batch: deduct every stock row (creating missing ones as
         // negative), write all SALE movements, record all payments and credit
         // their accounts. Postgres serializes concurrent writes to the same row
@@ -298,24 +355,24 @@ export async function checkoutAction(
               },
             }),
           ),
-          ...input.payments.map((p) =>
+          ...accountPayments.map((p) =>
             tx.payment.create({
               data: {
                 saleId: sale.id,
                 method: p.method,
                 provider: p.provider ?? null,
-                amount: money(Number(p.amount)),
+                amount: money(p.amount),
                 accountId: p.accountId ?? null,
                 reference: p.reference ?? `RCPT-${invoiceNo}`,
               },
             }),
           ),
-          ...input.payments
+          ...accountPayments
             .filter((p) => p.accountId != null)
             .map((p) =>
               tx.bankAccount.updateMany({
                 where: { id: p.accountId as string, businessId: session.businessId },
-                data: { balance: { increment: money(Number(p.amount)) } },
+                data: { balance: { increment: money(p.amount) } },
               }),
             ),
         ]);
@@ -398,6 +455,12 @@ export async function getReceiptAction(saleId: string): Promise<
   });
   if (!sale) return { ok: false, error: "Sale not found." };
 
+  // Item subtotals are pre-overall-discount; the overall discount is the gap
+  // between their sum and the sale total (old code used total + due, which
+  // inflated the subtotal on part-paid sales).
+  const subtotal = sale.items.reduce((s, i) => s + Number(i.subtotal), 0);
+  const discount = Math.max(0, subtotal - Number(sale.totalAmount));
+
   return {
     ok: true,
     receipt: {
@@ -415,8 +478,8 @@ export async function getReceiptAction(saleId: string): Promise<
         subtotal: i.subtotal.toFixed(2),
       })),
       totals: {
-        subtotal: (Number(sale.totalAmount) + Number(sale.due)).toFixed(2),
-        discount: "0.00",
+        subtotal: subtotal.toFixed(2),
+        discount: discount.toFixed(2),
         total: sale.totalAmount.toFixed(2),
         paid: sale.totalPaid.toFixed(2),
         due: sale.due.toFixed(2),

@@ -2,6 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { can } from "@/lib/rbac";
 
 export type DashboardRangeInput = {
   /** yyyy-MM-dd (local). Defaults to today when omitted. */
@@ -45,6 +46,7 @@ export type RecentSaleRow = {
   id: string;
   invoiceNo: string;
   customerName: string | null;
+  soldByName: string;
   totalAmount: string;
   paymentStatus: string;
   status: "COMPLETED" | "REFUNDED" | "CANCELLED";
@@ -119,6 +121,8 @@ export async function getDashboardStats(
 ): Promise<DashboardStats | null> {
   const session = await getSessionUser();
   if (!session) return null;
+  // Mirror the page-level guard: staff must not pull dashboard stats directly.
+  if (!can(session.role, "reports.view")) return null;
 
   const today = startOfDay(new Date());
   let from = startOfDay(parseYmd(input.from, today));
@@ -238,6 +242,7 @@ export async function getDashboardStats(
         status: true,
         createdAt: true,
         customer: { select: { name: true } },
+        soldBy: { select: { name: true } },
       },
     }),
   ]);
@@ -387,6 +392,7 @@ export async function getDashboardStats(
       id: s.id,
       invoiceNo: s.invoiceNo,
       customerName: s.customer?.name ?? null,
+      soldByName: s.soldBy.name,
       totalAmount: s.totalAmount.toString(),
       paymentStatus: s.paymentStatus,
       status: s.status,

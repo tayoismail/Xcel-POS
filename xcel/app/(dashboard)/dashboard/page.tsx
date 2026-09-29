@@ -9,6 +9,8 @@ export const metadata = { title: "Dashboard" };
 export default async function DashboardPage() {
   const session = await getSessionUser();
   if (!session) redirect("/login");
+  // Salespeople work from the POS terminal only.
+  if (session.role === "STAFF") redirect("/dashboard/pos");
 
   const now = new Date();
   const ymd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;

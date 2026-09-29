@@ -156,6 +156,8 @@ model User {
   businessId  String
   // Link to the Supabase auth user (auth.users.id), populated at sign-up
   authUserId  String?   @unique
+  // One-time code the invitee enters at sign-up to join this business
+  inviteCode  String?   @unique
   deletedAt   DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt

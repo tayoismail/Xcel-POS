@@ -16,19 +16,14 @@ async function requireSession() {
 const money = (n: number) => new Prisma.Decimal(n.toFixed(2));
 const isManagerRole = (role: string) => role === "OWNER" || role === "MANAGER";
 
-export const EXPENSE_CATEGORIES = [
-  "Rent",
-  "Utilities",
-  "Internet",
-  "Salaries",
-  "Transport",
-  "Repairs",
-  "Marketing",
-  "Supplies",
-  "Other",
-] as const;
-
-export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+/** Manager-only read guard — blocks staff calling these actions directly. */
+async function requireManagerSession() {
+  const session = await requireSession();
+  if (!isManagerRole(session.role)) {
+    throw new Error("Forbidden: manager access required.");
+  }
+  return session;
+}
 
 export type AccountOption = {
   id: string;
@@ -57,7 +52,7 @@ export type ExpenseListResult = {
 };
 
 export async function listExpenseAccountsAction(): Promise<AccountOption[]> {
-  const session = await requireSession();
+  const session = await requireManagerSession();
   const accounts = await prisma.bankAccount.findMany({
     where: { businessId: session.businessId, isActive: true },
     orderBy: [{ type: "asc" }, { name: "asc" }],
@@ -72,7 +67,7 @@ export async function listExpensesAction(opts: {
   page?: number;
   pageSize?: number;
 }): Promise<ExpenseListResult> {
-  const session = await requireSession();
+  const session = await requireManagerSession();
   const page = Math.max(1, opts.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, opts.pageSize ?? 25));
   const term = opts.search?.trim();

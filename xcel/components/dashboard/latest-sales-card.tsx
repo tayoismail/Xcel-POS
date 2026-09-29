@@ -68,6 +68,9 @@ export function LatestSalesCard({
                   </p>
                   <p className="truncate text-xs text-slate-500 dark:text-muted-foreground">
                     {sale.customerName ?? "Walk-in"} · {formatTime(sale.createdAt)}
+                    {sale.soldByName ? (
+                      <span className="text-slate-400 dark:text-muted-soft"> · {sale.soldByName}</span>
+                    ) : null}
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">

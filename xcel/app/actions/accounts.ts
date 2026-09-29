@@ -16,6 +16,15 @@ async function requireSession() {
 const money = (n: number) => new Prisma.Decimal(n.toFixed(2));
 const isManagerRole = (role: string) => role === "OWNER" || role === "MANAGER";
 
+/** Manager-only read guard — blocks staff calling these actions directly. */
+async function requireManagerSession() {
+  const session = await requireSession();
+  if (!isManagerRole(session.role)) {
+    throw new Error("Forbidden: manager access required.");
+  }
+  return session;
+}
+
 export type AccountTypeFilter = "BANK" | "CASH" | "POS";
 
 export type AccountRow = {
@@ -31,7 +40,7 @@ export type AccountRow = {
 };
 
 export async function listAccountsAction(): Promise<AccountRow[]> {
-  const session = await requireSession();
+  const session = await requireManagerSession();
   const accounts = await prisma.bankAccount.findMany({
     where: { businessId: session.businessId },
     orderBy: [{ isActive: "desc" }, { type: "asc" }, { name: "asc" }],
@@ -42,24 +51,43 @@ export async function listAccountsAction(): Promise<AccountRow[]> {
       accountNumber: true,
       balance: true,
       isActive: true,
-      payments: {
-        select: { amount: true, createdAt: true },
-        orderBy: { createdAt: "desc" },
-        take: 50,
-      },
-      expenses: {
-        select: { amount: true, date: true },
-        orderBy: { date: "desc" },
-        take: 50,
-      },
     },
   });
 
+  // Full-history KPIs — the old `take: 50` relations capped them silently.
+  const ids = accounts.map((a) => a.id);
+  const [paymentAgg, expenseAgg] = await Promise.all([
+    ids.length
+      ? prisma.payment.groupBy({
+          by: ["accountId"],
+          where: { accountId: { in: ids } },
+          _sum: { amount: true },
+          _max: { createdAt: true },
+        })
+      : Promise.resolve([]),
+    ids.length
+      ? prisma.expense.groupBy({
+          by: ["accountId"],
+          where: { accountId: { in: ids } },
+          _sum: { amount: true },
+          _max: { date: true },
+        })
+      : Promise.resolve([]),
+  ]);
+  const payByAccount = new Map(
+    paymentAgg.map((g) => [g.accountId, { sum: Number(g._sum.amount ?? 0), last: g._max.createdAt }]),
+  );
+  const expByAccount = new Map(
+    expenseAgg.map((g) => [g.accountId, { sum: Number(g._sum.amount ?? 0), last: g._max.date }]),
+  );
+
   return accounts.map((a) => {
-    const paymentsIn = a.payments.reduce((s, p) => s + Number(p.amount), 0);
-    const spent = a.expenses.reduce((s, e) => s + Number(e.amount), 0);
-    const lastPayment = a.payments[0]?.createdAt ?? null;
-    const lastExpense = a.expenses[0]?.date ?? null;
+    const pay = payByAccount.get(a.id);
+    const exp = expByAccount.get(a.id);
+    const paymentsIn = pay?.sum ?? 0;
+    const spent = exp?.sum ?? 0;
+    const lastPayment = pay?.last ?? null;
+    const lastExpense = exp?.last ?? null;
     const lastActivity =
       lastPayment && lastExpense
         ? lastPayment > lastExpense

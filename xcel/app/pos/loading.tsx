@@ -6,7 +6,7 @@ export default function PosLoading() {
       role="status"
       aria-busy="true"
       aria-label="Loading the POS terminal"
-      className="flex h-svh w-full flex-col overflow-hidden bg-background"
+      className="flex h-svh w-full flex-col overflow-hidden bg-[#E9EDF2] dark:bg-[#0A0C0B]"
     >
       <header className="flex h-16 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-4">
         <div className="flex items-center gap-3">
@@ -27,7 +27,7 @@ export default function PosLoading() {
       </header>
 
       <div className="flex min-h-0 flex-1 gap-5 p-4">
-        <div className="flex min-w-0 flex-1 flex-col gap-3 rounded-xl border border-border bg-card p-4">
+        <div className="flex min-w-0 flex-1 flex-col gap-3 p-4">
           <Skeleton className="h-11 w-full rounded-lg" />
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
             {Array.from({ length: 10 }).map((_, i) => (
@@ -35,7 +35,7 @@ export default function PosLoading() {
             ))}
           </div>
         </div>
-        <div className="hidden w-[46%] flex-col gap-3 rounded-xl border border-border bg-card p-4 lg:flex">
+        <div className="hidden w-[58%] flex-col gap-3 rounded-xl border border-border bg-[#F4F6F9] p-4 lg:flex dark:bg-[#141817]">
           <Skeleton className="h-6 w-32" />
           {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} className="h-16 rounded-xl" />

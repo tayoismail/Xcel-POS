@@ -78,8 +78,11 @@ export function ProductsTable({
   const [isPending, startTransition] = useTransition();
   const firstRender = useRef(true);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Monotonic sequence — only the newest in-flight response may write state.
+  const refreshSeq = useRef(0);
 
   async function refresh(opts?: { search?: string; page?: number; pageSize?: number }) {
+    const seq = ++refreshSeq.current;
     setLoading(true);
     try {
       const res = await listProductsAction({
@@ -87,14 +90,18 @@ export function ProductsTable({
         page: opts?.page ?? page,
         pageSize: opts?.pageSize ?? pageSize,
       });
+      if (seq !== refreshSeq.current) return; // a newer request superseded this one
       setRows(res.rows);
       setTotal(res.total);
       setPageCount(res.pageCount);
       setPage(res.page);
+      setSelected(new Set()); // rows changed — drop stale cross-page selection
     } catch {
-      toast.error("Couldn't load products", { description: "Please try again." });
+      if (seq === refreshSeq.current) {
+        toast.error("Couldn't load products", { description: "Please try again." });
+      }
     } finally {
-      setLoading(false);
+      if (seq === refreshSeq.current) setLoading(false);
     }
   }
 
@@ -154,16 +161,21 @@ export function ProductsTable({
       prev.map((r) => (selected.has(r.id) ? { ...r, status } : r)),
     );
     startTransition(() => {
-      void setProductStatusAction(ids, status).then((res) => {
-        if (res.ok) {
-          toast.success(
-            `${ids.length} product${ids.length > 1 ? "s" : ""} ${status === "ACTIVE" ? "activated" : "deactivated"}`,
-          );
-        } else {
-          setRows(snapshot);
-          toast.error("Bulk update failed", { description: res.error });
-        }
-      });
+      void setProductStatusAction(ids, status)
+        .then((res) => {
+          if (res.ok) {
+            toast.success(
+              `${ids.length} product${ids.length > 1 ? "s" : ""} ${status === "ACTIVE" ? "activated" : "deactivated"}`,
+            );
+          } else {
+            setRows(snapshot);
+            toast.error("Bulk update failed", { description: res.error });
+          }
+        })
+        .catch(() => {
+          setRows(snapshot); // action threw / network dropped — roll back
+          toast.error("Bulk update failed", { description: "Network error — please try again." });
+        });
     });
   }
 
@@ -177,17 +189,24 @@ export function ProductsTable({
     setTotal((t) => Math.max(0, t - ids.length));
     setConfirmDelete(false);
     startTransition(() => {
-      void deleteProductsAction(ids).then((res) => {
-        if (res.ok) {
-          toast.success(`Deleted ${ids.length} product${ids.length > 1 ? "s" : ""}`, {
-            description: removed.map((r) => r.name).slice(0, 3).join(", ") + (ids.length > 3 ? "…" : ""),
-          });
-          void refresh();
-        } else {
-          setRows(snapshot);
-          toast.error("Delete failed", { description: res.error });
-        }
-      });
+      void deleteProductsAction(ids)
+        .then((res) => {
+          if (res.ok) {
+            toast.success(`Deleted ${ids.length} product${ids.length > 1 ? "s" : ""}`, {
+              description: removed.map((r) => r.name).slice(0, 3).join(", ") + (ids.length > 3 ? "…" : ""),
+            });
+            void refresh();
+          } else {
+            setRows(snapshot);
+            setSelected(new Set(ids));
+            toast.error("Delete failed", { description: res.error });
+          }
+        })
+        .catch(() => {
+          setRows(snapshot); // action threw / network dropped — roll back
+          setSelected(new Set(ids));
+          toast.error("Delete failed", { description: "Network error — please try again." });
+        });
     });
   }
 
@@ -226,13 +245,12 @@ export function ProductsTable({
     toast.success(`Exported ${scope.length} product${scope.length > 1 ? "s" : ""} to CSV`);
   }
 
-  const categories = useRef<Category[] | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
+  // Refresh on every open so categories added in Settings show up immediately.
   async function openForm(product: ProductRow | null) {
-    if (!categories.current) {
-      void listCategoriesAction().then((cats) => {
-        categories.current = cats;
-      });
-    }
+    void listCategoriesAction()
+      .then(setCategories)
+      .catch(() => toast.error("Couldn't load categories"));
     setEditing(product);
     setFormOpen(true);
   }
@@ -486,7 +504,7 @@ export function ProductsTable({
       <ProductFormDialog
         open={formOpen}
         onOpenChange={setFormOpen}
-        categories={categories.current ?? []}
+        categories={categories}
         product={editing}
         onSaved={() => void refresh()}
       />

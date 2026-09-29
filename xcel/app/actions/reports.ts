@@ -3,6 +3,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { can } from "@/lib/rbac";
 
 /* ------------------------------------------------------------------ types */
 
@@ -56,6 +57,10 @@ const n = (v: unknown) => Number(v ?? 0);
 async function requireBusiness() {
   const session = await getSessionUser();
   if (!session) throw new Error("Unauthorized");
+  // Mirror the page-level guard: salespeople must not pull reports directly.
+  if (!can(session.role, "reports.view")) {
+    throw new Error("Forbidden: your role cannot view reports.");
+  }
   return session;
 }
 

@@ -15,6 +15,15 @@ async function requireSession() {
 
 const isManagerRole = (role: string) => role === "OWNER" || role === "MANAGER";
 
+/** Manager-only read guard — blocks staff calling these actions directly. */
+async function requireManagerSession() {
+  const session = await requireSession();
+  if (!isManagerRole(session.role)) {
+    throw new Error("Forbidden: manager access required.");
+  }
+  return session;
+}
+
 export type ProductionLogRow = {
   id: string;
   createdAt: string;
@@ -39,7 +48,7 @@ export async function listProductionLogsAction(opts: {
   page?: number;
   pageSize?: number;
 }): Promise<ProductionListResult> {
-  const session = await requireSession();
+  const session = await requireManagerSession();
   const page = Math.max(1, opts.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, opts.pageSize ?? 25));
   const term = opts.search?.trim();

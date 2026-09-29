@@ -8,6 +8,7 @@ export const metadata = { title: "Stock Manager" };
 export default async function InventoryPage() {
   const session = await getSessionUser();
   if (!session) redirect("/login");
+  if (session.role === "STAFF") redirect("/dashboard");
 
   return (
     <div className="space-y-6">

@@ -66,11 +66,15 @@ export async function nextDocumentNumber(
   client: Prisma.TransactionClient | PrismaClient = prisma,
 ): Promise<string> {
   const { prefix } = KINDS[kind];
-  const floor = Prisma.sql`GREATEST("InvoiceCounter"."nextNumber" + 1, ${await legacyMax(client, businessId, kind) + 1})`;
+  // First reservation for this business/kind: seed the counter past every
+  // number already stored on document rows (e.g. seeded PUR-0001/0002), so
+  // the INSERT path can never hand back a number that already exists.
+  const seed = Math.max(1, (await legacyMax(client, businessId, kind)) + 1);
+  const floor = Prisma.sql`GREATEST("InvoiceCounter"."nextNumber" + 1, ${seed})`;
 
   const rows = await client.$queryRaw<{ nextNumber: number }[]>`
     INSERT INTO "InvoiceCounter" ("id", "businessId", "kind", "nextNumber", "updatedAt")
-    VALUES (${randomUUID()}, ${businessId}, ${kind}::"InvoiceDocKind", ${1}, now())
+    VALUES (${randomUUID()}, ${businessId}, ${kind}::"InvoiceDocKind", ${seed}, now())
     ON CONFLICT ("businessId", "kind")
     DO UPDATE SET "nextNumber" = ${floor}, "updatedAt" = now()
     RETURNING "nextNumber"

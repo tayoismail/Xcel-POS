@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -130,8 +130,12 @@ export function ReportsClient({
     void getReportFilterOptions().then(setOptions).catch(() => setOptions(null));
   }, []);
 
+  // Only the newest request may write — tab/filter switches used to let a
+  // slow old response overwrite the freshly selected report.
+  const loadSeqRef = useRef(0);
   const load = useCallback(
     async (which: ReportTab, f: ReportFilterState) => {
+      const seq = ++loadSeqRef.current;
       setLoading(true);
       const filters = {
         from: f.range.from,
@@ -147,33 +151,34 @@ export function ReportsClient({
         timeFrom: f.timeFrom || undefined,
         timeTo: f.timeTo || undefined,
       };
+      const stale = () => seq !== loadSeqRef.current;
       try {
         if (which === "sales") {
           const data = await getSalesReport(filters);
-          if (data) setReport({ tab: "sales", data });
+          if (data && !stale()) setReport({ tab: "sales", data });
         } else if (which === "invoices") {
           const data = await getInvoicesReport(filters);
-          if (data) setReport({ tab: "invoices", data });
+          if (data && !stale()) setReport({ tab: "invoices", data });
         } else if (which === "stock") {
           const data = await getStockReport(filters);
-          if (data) setReport({ tab: "stock", data });
+          if (data && !stale()) setReport({ tab: "stock", data });
         } else if (which === "purchases") {
           const data = await getPurchasesReport(filters);
-          if (data) setReport({ tab: "purchases", data });
+          if (data && !stale()) setReport({ tab: "purchases", data });
         } else if (which === "profit") {
           const data = await getProfitLossReport(filters);
-          if (data) setReport({ tab: "profit", data });
+          if (data && !stale()) setReport({ tab: "profit", data });
         } else if (which === "expenses") {
           const data = await getExpensesReport(filters);
-          if (data) setReport({ tab: "expenses", data });
+          if (data && !stale()) setReport({ tab: "expenses", data });
         } else {
           const data = await getCrmReport(filters);
-          if (data) setReport({ tab: "crm", data });
+          if (data && !stale()) setReport({ tab: "crm", data });
         }
       } catch {
-        toast.error("Couldn't load the report", { description: "Please try again." });
+        if (!stale()) toast.error("Couldn't load the report", { description: "Please try again." });
       } finally {
-        setLoading(false);
+        if (!stale()) setLoading(false);
       }
     },
     [],

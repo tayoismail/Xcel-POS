@@ -20,6 +20,15 @@ const money = (n: number) => new Prisma.Decimal(n.toFixed(2));
 
 const isManagerRole = (role: string) => role === "OWNER" || role === "MANAGER";
 
+/** Manager-only read guard — blocks staff calling these actions directly. */
+async function requireManagerSession() {
+  const session = await requireSession();
+  if (!isManagerRole(session.role)) {
+    throw new Error("Forbidden: manager access required.");
+  }
+  return session;
+}
+
 export type SupplierOption = {
   id: string;
   name: string;
@@ -69,7 +78,7 @@ export type PurchaseListResult = {
 /* ----------------------------------------------------------- lookups */
 
 export async function listSuppliersAction(): Promise<SupplierOption[]> {
-  const session = await requireSession();
+  const session = await requireManagerSession();
   return prisma.supplier.findMany({
     where: { businessId: session.businessId, deletedAt: null },
     orderBy: { name: "asc" },
@@ -108,7 +117,7 @@ export async function createSupplierAction(input: {
 export async function searchPurchaseProductsAction(
   search: string,
 ): Promise<PurchaseProductOption[]> {
-  const session = await requireSession();
+  const session = await requireManagerSession();
   const term = search.trim();
 
   const rows = await prisma.product.findMany({
@@ -156,7 +165,7 @@ export async function listPurchasesAction(opts: {
   page?: number;
   pageSize?: number;
 }): Promise<PurchaseListResult> {
-  const session = await requireSession();
+  const session = await requireManagerSession();
   const page = Math.max(1, opts.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, opts.pageSize ?? 25));
   const term = opts.search?.trim();

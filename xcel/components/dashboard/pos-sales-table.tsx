@@ -117,9 +117,12 @@ export function PosSalesTable({
 
   const firstRender = useRef(true);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Only the newest in-flight response may write state.
+  const refreshSeq = useRef(0);
 
   const refresh = useCallback(
     async (opts?: { page?: number }) => {
+      const seq = ++refreshSeq.current;
       setLoading(true);
       try {
         const res = await listSalesAction({
@@ -130,15 +133,18 @@ export function PosSalesTable({
           page: opts?.page ?? page,
           pageSize,
         });
+        if (seq !== refreshSeq.current) return; // superseded by a newer request
         setRows(res.rows);
         setTotal(res.total);
         setPage(res.page);
         setPageCount(res.pageCount);
         setCounts(res.counts);
       } catch {
-        toast.error("Couldn't load sales", { description: "Please try again." });
+        if (seq === refreshSeq.current) {
+          toast.error("Couldn't load sales", { description: "Please try again." });
+        }
       } finally {
-        setLoading(false);
+        if (seq === refreshSeq.current) setLoading(false);
       }
     },
     [search, soldById, paymentStatus, paymentMethod, page, pageSize],
@@ -194,11 +200,8 @@ export function PosSalesTable({
       { event: "*", schema: "public", table: "Sale", filter: `businessId=eq.${businessId}` },
       onChange,
     );
-    channel.on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "Payment" },
-      onChange,
-    );
+    // No Payment channel: Payment has no businessId to filter on, and every
+    // payment worth reacting to arrives with a Sale row change anyway.
     channel.subscribe((status) => {
       setLive(status === "SUBSCRIBED");
     });
@@ -253,6 +256,8 @@ export function PosSalesTable({
         void refresh();
       }
       setRefundTarget(null);
+    } catch {
+      toast.error("Refund failed", { description: "Network error — please try again." });
     } finally {
       setBusy(false);
     }
@@ -271,6 +276,8 @@ export function PosSalesTable({
         void refresh();
       }
       setDeleteTarget(null);
+    } catch {
+      toast.error("Delete failed", { description: "Network error — please try again." });
     } finally {
       setBusy(false);
     }
@@ -381,7 +388,7 @@ export function PosSalesTable({
               <TableHead className="hidden md:table-cell">Method</TableHead>
               <TableHead>Payment</TableHead>
               <TableHead className="hidden xl:table-cell">Status</TableHead>
-              <TableHead className="hidden lg:table-cell">Sold by</TableHead>
+              <TableHead>Sold by</TableHead>
               <TableHead className="hidden 2xl:table-cell">Location</TableHead>
               <TableHead className="pr-4 text-right">Actions</TableHead>
             </TableRow>
@@ -420,7 +427,7 @@ export function PosSalesTable({
                     <TableCell className="hidden xl:table-cell">
                       <Skeleton className="h-5 w-18 rounded-full" />
                     </TableCell>
-                    <TableCell className="hidden lg:table-cell">
+                    <TableCell>
                       <Skeleton className="h-4 w-20" />
                     </TableCell>
                     <TableCell className="hidden 2xl:table-cell">
@@ -486,7 +493,7 @@ export function PosSalesTable({
                           <Badge variant={status?.variant ?? "outline"}>{status?.label ?? row.status}</Badge>
                         )}
                       </TableCell>
-                      <TableCell className="hidden text-muted-foreground lg:table-cell">
+                      <TableCell className="text-muted-foreground">
                         {row.soldByName}
                       </TableCell>
                       <TableCell className="hidden text-muted-foreground 2xl:table-cell">

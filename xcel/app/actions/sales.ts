@@ -23,6 +23,7 @@ export type SaleRow = {
   invoiceNo: string;
   createdAt: string;
   customerName: string | null;
+  soldById: string;
   soldByName: string;
   locationName: string;
   itemsCount: number;
@@ -158,6 +159,7 @@ export async function listSalesAction(opts: {
         paymentMethod: true,
         paymentStatus: true,
         status: true,
+        soldById: true,
         customer: { select: { name: true } },
         soldBy: { select: { name: true } },
         location: { select: { name: true } },
@@ -185,6 +187,7 @@ export async function listSalesAction(opts: {
       invoiceNo: r.invoiceNo,
       createdAt: r.createdAt.toISOString(),
       customerName: r.customer?.name ?? null,
+      soldById: r.soldById,
       soldByName: r.soldBy.name,
       locationName: r.location.name,
       itemsCount: r.itemsCount,
@@ -330,14 +333,56 @@ export async function updateSaleAction(input: {
   else paid = Math.min(Math.max(0, Number(input.amountPaid ?? 0)), total);
 
   try {
-    await prisma.sale.update({
-      where: { id: sale.id },
-      data: {
-        paymentMethod: input.paymentMethod,
-        paymentStatus: input.paymentStatus,
-        totalPaid: money(paid),
-        due: money(total - paid),
-      },
+    // Payment rows and account balances must move together with totalPaid —
+    // otherwise the sale says one thing and the bank accounts another.
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.payment.findMany({
+        where: { saleId: sale.id },
+        orderBy: { createdAt: "asc" },
+        select: { method: true, provider: true, amount: true, accountId: true },
+      });
+      const oldPaid = Number(existing.reduce((s, p) => s + Number(p.amount), 0).toFixed(2));
+      const delta = Number((paid - oldPaid).toFixed(2));
+
+      await tx.sale.update({
+        where: { id: sale.id },
+        data: {
+          paymentMethod: input.paymentMethod,
+          paymentStatus: input.paymentStatus,
+          totalPaid: money(paid),
+          due: money(total - paid),
+        },
+      });
+
+      if (delta !== 0) {
+        // Net change hits the account the money was sitting in (if any).
+        const credited = existing.find((p) => p.accountId);
+        if (credited?.accountId) {
+          await tx.bankAccount.updateMany({
+            where: { id: credited.accountId, businessId: session.businessId },
+            data:
+              delta > 0
+                ? { balance: { increment: money(delta) } }
+                : { balance: { decrement: money(-delta) } },
+          });
+        }
+        // The edit dialog is single-method, so one row mirrors what the UI
+        // can express; rebuild it to sum to the new paid amount.
+        await tx.payment.deleteMany({ where: { saleId: sale.id } });
+        if (paid > 0) {
+          const template = credited ?? existing[0];
+          await tx.payment.create({
+            data: {
+              saleId: sale.id,
+              method: input.paymentMethod,
+              provider: template && template.method === input.paymentMethod ? template.provider : null,
+              amount: money(paid),
+              accountId: template?.accountId ?? null,
+              reference: `RCPT-${sale.invoiceNo}`,
+            },
+          });
+        }
+      }
     });
     await audit({
       businessId: session.businessId,
@@ -377,6 +422,7 @@ export async function markRefundedAction(saleId: string): Promise<ActionState> {
       status: true,
       locationId: true,
       items: { select: { productId: true, qty: true } },
+      payments: { select: { accountId: true, amount: true } },
     },
   });
   if (!sale) return { ok: false, error: "Sale not found." };
@@ -388,6 +434,14 @@ export async function markRefundedAction(saleId: string): Promise<ActionState> {
         where: { id: sale.id },
         data: { status: "REFUNDED" },
       });
+      // Money back: reverse the account balances credited at checkout.
+      for (const p of sale.payments) {
+        if (!p.accountId) continue;
+        await tx.bankAccount.updateMany({
+          where: { id: p.accountId, businessId: session.businessId },
+          data: { balance: { decrement: p.amount } },
+        });
+      }
       // Restock returned items + audit movements
       for (const item of sale.items) {
         await tx.stockLevel.upsert({
@@ -452,6 +506,7 @@ export async function deleteSaleAction(saleId: string): Promise<ActionState> {
       locationId: true,
       totalAmount: true,
       items: { select: { productId: true, qty: true } },
+      payments: { select: { accountId: true, amount: true } },
     },
   });
   if (!sale) return { ok: false, error: "Sale not found." };
@@ -463,6 +518,17 @@ export async function deleteSaleAction(saleId: string): Promise<ActionState> {
         where: { saleId: sale.id },
         data: { saleId: null },
       });
+      // Money back: reverse account balances credited at checkout — unless a
+      // refund already reversed them.
+      if (sale.status !== "REFUNDED") {
+        for (const p of sale.payments) {
+          if (!p.accountId) continue;
+          await tx.bankAccount.updateMany({
+            where: { id: p.accountId, businessId: session.businessId },
+            data: { balance: { decrement: p.amount } },
+          });
+        }
+      }
       await tx.payment.deleteMany({ where: { saleId: sale.id } });
 
       // Restock unless it was already refunded (which restocked once)

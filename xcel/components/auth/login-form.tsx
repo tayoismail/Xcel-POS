@@ -30,12 +30,23 @@ const magicSchema = z.object({
   email: z.string().min(1, "Email is required").email("Enter a valid email"),
 });
 
-const signupSchema = z.object({
-  name: z.string().min(2, "Enter your full name"),
-  businessName: z.string().min(2, "Enter your business name"),
-  email: z.string().email("Enter a valid email"),
-  password: z.string().min(8, "At least 8 characters"),
-});
+const signupSchema = z
+  .object({
+    name: z.string().min(2, "Enter your full name"),
+    businessName: z.string().optional(),
+    email: z.string().email("Enter a valid email"),
+    password: z.string().min(8, "At least 8 characters"),
+    joinCode: z.string().optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (!val.joinCode?.trim() && (val.businessName ?? "").trim().length < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["businessName"],
+        message: "Enter your business name",
+      });
+    }
+  });
 
 type PasswordForm = z.infer<typeof passwordSchema>;
 type MagicForm = z.infer<typeof magicSchema>;
@@ -47,25 +58,38 @@ export function LoginForm() {
 
   const signupForm = useForm<SignupForm>({
     resolver: zodResolver(signupSchema),
-    defaultValues: { name: "", businessName: "", email: "", password: "" },
+    defaultValues: { name: "", businessName: "", email: "", password: "", joinCode: "" },
   });
+
+  // When an invite code is pasted, the user is joining an existing business —
+  // the business-name field is irrelevant (and hidden).
+  const joinCodeValue = signupForm.watch("joinCode");
+  const isInvite = !!joinCodeValue?.trim();
 
   async function onSignUp(values: SignupForm) {
     try {
       const res = await fetch("/auth/sign-up", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(values),
+        body: JSON.stringify({
+          ...values,
+          businessName: values.businessName?.trim() ? values.businessName.trim() : undefined,
+          joinCode: values.joinCode?.trim() ? values.joinCode.trim().toUpperCase() : undefined,
+        }),
       });
-      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      const body = (await res.json().catch(() => null)) as
+        | { error?: string; joined?: boolean }
+        | null;
       if (!res.ok) {
         toast.error("Couldn't create your account", {
           description: body?.error ?? "Please try again.",
         });
         return;
       }
-      toast.success("Account created", {
-        description: "Check your inbox to confirm your email, then sign in.",
+      toast.success(body?.joined ? "You've joined the team" : "Account created", {
+        description: body?.joined
+          ? "Sign in with your email and password to start working."
+          : "Check your inbox to confirm your email, then sign in.",
       });
       window.location.assign("/login?registered=1");
     } catch {
@@ -314,18 +338,36 @@ export function LoginForm() {
                   <p className="text-xs text-destructive">{signupForm.formState.errors.name.message}</p>
                 ) : null}
               </div>
+              {!isInvite && (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="su-biz">Business name</Label>
+                  <Input
+                    id="su-biz"
+                    placeholder="Xcel Phones Ltd"
+                    autoComplete="organization"
+                    aria-invalid={!!signupForm.formState.errors.businessName}
+                    {...signupForm.register("businessName")}
+                  />
+                  {signupForm.formState.errors.businessName ? (
+                    <p className="text-xs text-destructive">{signupForm.formState.errors.businessName.message}</p>
+                  ) : null}
+                </div>
+              )}
               <div className="grid gap-1.5">
-                <Label htmlFor="su-biz">Business name</Label>
+                <Label htmlFor="su-code">Invite code {isInvite ? "" : "(optional)"}</Label>
                 <Input
-                  id="su-biz"
-                  placeholder="Xcel Phones Ltd"
-                  autoComplete="organization"
-                  aria-invalid={!!signupForm.formState.errors.businessName}
-                  {...signupForm.register("businessName")}
+                  id="su-code"
+                  placeholder="e.g. K7M2Q9XA"
+                  autoComplete="off"
+                  autoCapitalize="characters"
+                  className="font-mono tracking-widest"
+                  {...signupForm.register("joinCode")}
                 />
-                {signupForm.formState.errors.businessName ? (
-                  <p className="text-xs text-destructive">{signupForm.formState.errors.businessName.message}</p>
-                ) : null}
+                <p className="text-xs text-muted-foreground">
+                  {isInvite
+                    ? "Joining an existing business — the owner gave you this code."
+                    : "Got an invite code from your owner? Paste it to join their team instead of creating a new business."}
+                </p>
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="su-email">Email</Label>
@@ -365,13 +407,24 @@ export function LoginForm() {
                     <LoaderCircle className="animate-spin" />
                     Creating account…
                   </>
+                ) : isInvite ? (
+                  "Join the team"
                 ) : (
                   "Create my business"
                 )}
               </Button>
               <p className="text-center text-xs font-medium text-slate-500 dark:text-muted-foreground">
-                You&apos;ll be set up as the <span className="font-semibold">Owner</span> with
-                full access. A “Main Shop” location is created for you.
+                {isInvite ? (
+                  <>
+                    You&apos;ll join the business as the role your owner assigned — no new
+                    business is created.
+                  </>
+                ) : (
+                  <>
+                    You&apos;ll be set up as the <span className="font-semibold">Owner</span> with
+                    full access. A “Main Shop” location is created for you.
+                  </>
+                )}
               </p>
             </form>
           </TabsContent>

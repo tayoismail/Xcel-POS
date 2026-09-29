@@ -81,13 +81,24 @@ export function DashboardHome({
   const rangeRef = useRef(range);
   rangeRef.current = range;
   const loadingRef = useRef(false);
+  // Newest user-requested range that arrived while a fetch was running.
+  const pendingRangeRef = useRef<DateRangeValue | null>(null);
+  // Only the newest in-flight fetch may write state.
+  const loadSeqRef = useRef(0);
 
   const load = useCallback(async (r: DateRangeValue, opts?: { silent?: boolean }) => {
-    if (loadingRef.current && !opts?.silent) return;
+    if (loadingRef.current && !opts?.silent) {
+      // Don't drop the range change — queue it to run when the current
+      // fetch finishes (the old code silently ignored it).
+      pendingRangeRef.current = r;
+      return;
+    }
+    const seq = ++loadSeqRef.current;
     loadingRef.current = true;
     if (!opts?.silent) setLoading(true);
     try {
       const next = await getDashboardStats({ from: r.from, to: r.to });
+      if (seq !== loadSeqRef.current) return; // superseded by a newer fetch
       if (next) {
         setStats(next);
         setUpdatedAt(next.updatedAt);
@@ -95,10 +106,15 @@ export function DashboardHome({
         window.setTimeout(() => setPulse(false), 450);
       }
     } catch {
-      toast.error("Couldn't refresh dashboard");
+      if (seq === loadSeqRef.current) toast.error("Couldn't refresh dashboard");
     } finally {
-      loadingRef.current = false;
-      setLoading(false);
+      if (seq === loadSeqRef.current) {
+        loadingRef.current = false;
+        setLoading(false);
+        const pending = pendingRangeRef.current;
+        pendingRangeRef.current = null;
+        if (pending) void loadRef.current(pending);
+      }
     }
   }, []);
 
