@@ -25,9 +25,9 @@ const features = [
   },
   {
     icon: Users,
-    title: "Customers & Branches",
+    title: "Walk-in Customers",
     description:
-      "CRM for walk-ins and regulars, multi-branch management with role-based access.",
+      "Capture walk-ins at the counter, look up regulars by phone, and track credit balances.",
   },
   {
     icon: BarChart3,
@@ -36,7 +36,14 @@ const features = [
   },
 ];
 
-const brands = ["Global Mobile", "Konga Mart", "PhoneHub NG", "Slot Systems", "Pointek", "Cerebraat"];
+const retailSegments = [
+  "Phone & Electronics",
+  "Fashion & Apparel",
+  "Supermarkets",
+  "Home & Hardware",
+  "Pharmacies",
+  "Gift & Lifestyle",
+];
 
 
 const footerColumns = [
@@ -46,7 +53,7 @@ const footerColumns = [
       { label: "POS Terminal", href: "/dashboard/pos" },
       { label: "Inventory", href: "/dashboard/products" },
       { label: "Reports", href: "/dashboard/reports" },
-      { label: "Customers", href: "/dashboard/customers" },
+      { label: "Invoices", href: "/dashboard/invoices" },
     ],
   },
   {
@@ -249,19 +256,19 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ===================================================== SOCIAL PROOF */}
+        {/* ===================================================== USE CASES */}
         <section className="border-b border-slate-200 bg-white py-12">
           <div className="mx-auto max-w-6xl px-6">
             <p className="text-center font-mono text-xs tracking-wider text-slate-500 uppercase">
-              Trusted by leading retail brands
+              Built for every kind of retail counter
             </p>
             <div className="mt-8 grid grid-cols-2 items-center justify-items-center gap-x-8 gap-y-6 sm:grid-cols-3 lg:grid-cols-6">
-              {brands.map((brand) => (
+              {retailSegments.map((segment) => (
                 <span
-                  key={brand}
-                  className="text-base font-bold tracking-tight text-slate-400 grayscale transition-colors hover:text-slate-600"
+                  key={segment}
+                  className="text-base font-bold tracking-tight text-slate-400 transition-colors hover:text-slate-600"
                 >
-                  {brand}
+                  {segment}
                 </span>
               ))}
             </div>

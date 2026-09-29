@@ -10,7 +10,6 @@ import {
   Boxes,
   ChevronLeft,
   FileText,
-  Factory,
   LayoutDashboard,
   LogOut,
   Package,
@@ -18,8 +17,6 @@ import {
   ScanBarcode,
   Settings2,
   ShoppingCart,
-  Store,
-  Users,
 } from "lucide-react";
 
 import { signOutAction } from "@/app/actions/auth";
@@ -71,7 +68,6 @@ const NAV: NavSection[] = [
       { href: "/dashboard/purchases", label: "Purchases", icon: ShoppingCart, roles: ["OWNER", "MANAGER"] },
       { href: "/dashboard/products", label: "Products", icon: Boxes, roles: ["OWNER", "MANAGER"] },
       { href: "/dashboard/inventory", label: "Stock Manager", icon: ArrowLeftRight, roles: ["OWNER", "MANAGER"] },
-      { href: "/dashboard/production", label: "Production", icon: Factory, roles: ["OWNER", "MANAGER"] },
       { href: "/dashboard/quotations", label: "Quotations", icon: ReceiptText, roles: ["OWNER", "MANAGER"] },
     ],
   },
@@ -86,8 +82,6 @@ const NAV: NavSection[] = [
   {
     label: "Business",
     items: [
-      { href: "/dashboard/customers", label: "Customers", icon: Users, roles: ["OWNER", "MANAGER"] },
-      { href: "/dashboard/branches", label: "Branches", icon: Store, roles: ["OWNER"] },
       { href: "/dashboard/settings", label: "Settings", icon: Settings2, roles: ["OWNER", "MANAGER"] },
     ],
   },
